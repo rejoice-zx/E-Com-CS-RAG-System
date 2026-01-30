@@ -40,22 +40,27 @@ def main():
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
     
-    # 用于存储登录信息
-    login_info = {"username": "", "role": "cs"}
-    
-    def on_login_success(username: str, role: str):
-        login_info["username"] = username
-        login_info["role"] = role
-    
     # 显示登录对话框
     login_dialog = LoginDialog()
-    login_dialog.login_success.connect(on_login_success)
     
     if login_dialog.exec():
-        # 登录成功，显示管理后台（传递用户名和角色）
+        # 登录成功，从权限管理器获取当前用户信息
+        from core.permissions import get_permission_manager
+        pm = get_permission_manager()
+        current_user = pm.get_current_user()
+        
+        if current_user:
+            username = current_user.username
+            role = current_user.role
+        else:
+            # 回退方案：使用登录对话框中的用户名
+            username = login_dialog.login_username.text().strip()
+            role = "cs"
+        
+        # 显示管理后台（传递用户名和角色）
         window = MainWindow(
-            username=login_info["username"],
-            role=login_info["role"]
+            username=username,
+            role=role
         )
         window.show()
         sys.exit(app.exec())

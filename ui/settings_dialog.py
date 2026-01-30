@@ -14,10 +14,11 @@ from qfluentwidgets import (
     MessageBoxBase, SubtitleLabel, BodyLabel,
     SpinBox, LineEdit, ComboBox, Slider,
     PrimaryPushButton, PushButton, PasswordLineEdit,
-    CardWidget
+    CardWidget, InfoBar, InfoBarPosition
 )
 
 from core.config import Config
+from core.api_client import APIClient
 
 
 class SettingsDialog(MessageBoxBase):
@@ -28,6 +29,7 @@ class SettingsDialog(MessageBoxBase):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.config = Config()
+        self.api_client = APIClient()
         
         self.titleLabel = SubtitleLabel("设置")
         self.viewLayout.addWidget(self.titleLabel)
@@ -40,7 +42,7 @@ class SettingsDialog(MessageBoxBase):
         
         self.yesButton.clicked.connect(self._save_settings)
         
-        self.widget.setMinimumWidth(450)
+        self.widget.setMinimumWidth(500)
     
     def _init_ui(self):
         """初始化UI"""
@@ -54,11 +56,23 @@ class SettingsDialog(MessageBoxBase):
         api_title.setStyleSheet("font-weight: bold;")
         api_layout.addWidget(api_title)
         
+        # LLM提供商选择
+        provider_row = QHBoxLayout()
+        provider_row.addWidget(BodyLabel("服务商:"))
+        self.provider_combo = ComboBox()
+        self._providers = self.api_client.get_available_providers()
+        for p in self._providers:
+            self.provider_combo.addItem(p["display_name"], p["name"])
+        self.provider_combo.currentIndexChanged.connect(self._on_provider_changed)
+        provider_row.addWidget(self.provider_combo)
+        provider_row.addStretch()
+        api_layout.addLayout(provider_row)
+        
         # API地址
         url_row = QHBoxLayout()
         url_row.addWidget(BodyLabel("API地址:"))
         self.api_url = LineEdit()
-        self.api_url.setPlaceholderText("https://api.siliconflow.cn/v1")
+        self.api_url.setPlaceholderText("使用默认地址")
         url_row.addWidget(self.api_url, 1)
         api_layout.addLayout(url_row)
         
@@ -70,18 +84,28 @@ class SettingsDialog(MessageBoxBase):
         key_row.addWidget(self.api_key, 1)
         api_layout.addLayout(key_row)
         
-        # 模型 - 硅基流动支持的模型
+        # 模型选择
         model_row = QHBoxLayout()
         model_row.addWidget(BodyLabel("模型:"))
         self.model_combo = ComboBox()
-        self.model_combo.addItems([
-            "Qwen/Qwen3-8B",
-            "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B",
-            "THUDM/GLM-4-9B-0414"
-        ])
-        model_row.addWidget(self.model_combo)
-        model_row.addStretch()
+        model_row.addWidget(self.model_combo, 1)
         api_layout.addLayout(model_row)
+        
+        # 自定义模型名称
+        custom_model_row = QHBoxLayout()
+        custom_model_row.addWidget(BodyLabel("自定义模型:"))
+        self.custom_model_input = LineEdit()
+        self.custom_model_input.setPlaceholderText("留空则使用上方选择的模型")
+        custom_model_row.addWidget(self.custom_model_input, 1)
+        api_layout.addLayout(custom_model_row)
+        
+        # 测试连接按钮
+        test_row = QHBoxLayout()
+        test_row.addStretch()
+        self.test_btn = PushButton("测试连接")
+        self.test_btn.clicked.connect(self._test_connection)
+        test_row.addWidget(self.test_btn)
+        api_layout.addLayout(test_row)
         
         self.viewLayout.addWidget(api_card)
         
@@ -125,14 +149,58 @@ class SettingsDialog(MessageBoxBase):
         
         self.viewLayout.addWidget(adv_card)
     
+    def _on_provider_changed(self, index: int):
+        """提供商切换时更新模型列表和默认API地址"""
+        if index < 0 or index >= len(self._providers):
+            return
+        
+        provider = self._providers[index]
+        
+        # 更新API地址占位符
+        self.api_url.setPlaceholderText(provider["default_api_url"])
+        
+        # 更新模型列表
+        self.model_combo.clear()
+        self.model_combo.addItems(provider["supported_models"])
+        
+        # 设置默认模型
+        default_model = provider["default_model"]
+        idx = self.model_combo.findText(default_model)
+        if idx >= 0:
+            self.model_combo.setCurrentIndex(idx)
+    
     def _load_settings(self):
         """加载设置"""
+        # 加载提供商
+        current_provider = self.config.get("llm_provider", "siliconflow")
+        for i, p in enumerate(self._providers):
+            if p["name"] == current_provider:
+                self.provider_combo.setCurrentIndex(i)
+                break
+        
+        # 触发一次提供商变更以更新模型列表
+        self._on_provider_changed(self.provider_combo.currentIndex())
+        
+        # 加载API地址
         self.api_url.setText(self.config.get("api_base_url", "", include_env=False))
+        
+        # 加载API密钥状态
         configured_key = bool(self.config.get("api_key", "", include_env=True))
         self.api_key.setText("")
         self.api_key.setPlaceholderText("已配置（不显示）" if configured_key else "sk-...")
-        self.model_combo.setCurrentText(self.config.get("model_name", "gpt-3.5-turbo"))
         
+        # 加载模型
+        model_name = self.config.get("model_name", "")
+        if model_name:
+            idx = self.model_combo.findText(model_name)
+            if idx >= 0:
+                self.model_combo.setCurrentIndex(idx)
+                self.custom_model_input.setText("")
+            else:
+                # 模型不在列表中，放到自定义输入框
+                self.custom_model_input.setText(model_name)
+        
+        # 加载高级设置
         self.max_tokens.setValue(self.config.get("max_tokens", 2048))
         temp = int(self.config.get("temperature", 0.7) * 100)
         self.temp_slider.setValue(temp)
@@ -140,9 +208,18 @@ class SettingsDialog(MessageBoxBase):
     
     def _save_settings(self):
         """保存设置"""
+        # 获取选中的提供商
+        provider_index = self.provider_combo.currentIndex()
+        provider_name = self._providers[provider_index]["name"] if provider_index >= 0 else "siliconflow"
+        
+        # 优先使用自定义模型名称
+        custom_model = self.custom_model_input.text().strip()
+        model_name = custom_model if custom_model else self.model_combo.currentText().strip()
+        
         settings: dict = {
+            "llm_provider": provider_name,
             "api_base_url": self.api_url.text().strip(),
-            "model_name": self.model_combo.currentText().strip(),
+            "model_name": model_name,
             "max_tokens": self.max_tokens.value(),
             "temperature": self.temp_slider.value() / 100
         }
@@ -154,4 +231,73 @@ class SettingsDialog(MessageBoxBase):
             self.api_key.setPlaceholderText("已配置（已保存）")
         
         self.config.update(settings)
+        
+        # 重新加载API客户端的提供商
+        self.api_client.reload_provider()
+        
         self.settings_changed.emit()
+    
+    def _test_connection(self):
+        """测试API连接"""
+        # 临时应用当前设置进行测试
+        provider_index = self.provider_combo.currentIndex()
+        if provider_index < 0:
+            InfoBar.error(
+                title="测试失败",
+                content="请选择服务商",
+                parent=self,
+                position=InfoBarPosition.TOP
+            )
+            return
+        
+        provider_name = self._providers[provider_index]["name"]
+        api_key = self.api_key.text().strip() or self.config.get("api_key", "")
+        api_url = self.api_url.text().strip() or None
+        
+        # 优先使用自定义模型
+        custom_model = self.custom_model_input.text().strip()
+        model = custom_model if custom_model else self.model_combo.currentText().strip() or None
+        
+        if not api_key:
+            InfoBar.error(
+                title="测试失败",
+                content="请输入API密钥",
+                parent=self,
+                position=InfoBarPosition.TOP
+            )
+            return
+        
+        self.test_btn.setEnabled(False)
+        self.test_btn.setText("测试中...")
+        
+        try:
+            # 创建临时提供商进行测试
+            from core.llm_providers import get_provider
+            provider_class = get_provider(provider_name)
+            provider = provider_class(api_key=api_key, api_url=api_url, model=model)
+            success, message = provider.test_connection()
+            
+            if success:
+                InfoBar.success(
+                    title="连接成功",
+                    content=message,
+                    parent=self,
+                    position=InfoBarPosition.TOP
+                )
+            else:
+                InfoBar.error(
+                    title="连接失败",
+                    content=message,
+                    parent=self,
+                    position=InfoBarPosition.TOP
+                )
+        except Exception as e:
+            InfoBar.error(
+                title="测试失败",
+                content=str(e),
+                parent=self,
+                position=InfoBarPosition.TOP
+            )
+        finally:
+            self.test_btn.setEnabled(True)
+            self.test_btn.setText("测试连接")

@@ -123,11 +123,13 @@ class Config:
         return {
             "font_size": 10,
             "theme": "light",
+            "llm_provider": "siliconflow",  # LLM提供商
             "api_base_url": "",
             "api_key_encrypted": "",  # 新的加密字段
-            "model_name": "gpt-3.5-turbo",
+            "model_name": "Qwen/Qwen3-8B",
             "max_tokens": 2048,
             "temperature": 0.7,
+            "api_timeout": 30,
             # RAG配置
             "embedding_model": "bge-large-zh",
             "chunk_size": 500,

@@ -122,6 +122,8 @@ python run_admin.py
 .
 ├── core/                 # 核心逻辑层
 │   ├── config.py         # 配置管理（含加密、热更新）
+│   ├── api_client.py     # API 客户端（多 LLM 提供商支持）
+│   ├── llm_providers.py  # LLM 提供商抽象层
 │   ├── logger.py         # 日志配置与轮转
 │   ├── shared_data.py    # 知识库、商品等共享数据管理
 │   ├── vector_store.py   # 向量索引管理（FAISS / numpy）
@@ -181,11 +183,13 @@ python run_admin.py
 {
   "font_size": 10,
   "theme": "light",
+  "llm_provider": "siliconflow",
   "api_base_url": "",
   "api_key_encrypted": "",
-  "model_name": "gpt-3.5-turbo",
+  "model_name": "Qwen/Qwen3-8B",
   "max_tokens": 2048,
   "temperature": 0.7,
+  "api_timeout": 30,
 
   "embedding_model": "bge-large-zh",
   "chunk_size": 500,
@@ -201,8 +205,11 @@ python run_admin.py
 
 关键参数说明：
 
-- `api_base_url`：Embedding / 对话 API 的 Base URL
+- `llm_provider`：LLM 服务商（openai / siliconflow / qwen / zhipu / deepseek）
+- `api_base_url`：Embedding / 对话 API 的 Base URL（留空使用提供商默认地址）
 - `api_key_encrypted`：加密后的 API 密钥（不要直接手改）
+- `model_name`：使用的模型名称（支持自定义）
+- `api_timeout`：API 请求超时时间（秒）
 - `embedding_model`：Embedding 模型名称（例如 `bge-large-zh`）
 - `chunk_size`：知识文本分块大小（字符数）
 - `chunk_overlap`：相邻分块重叠长度
@@ -412,12 +419,28 @@ git grep -n \"API_KEY\\|OPENAI\\|SILICONFLOW\\|sk-\\|Bearer \" -- . \
 
 ### Q4：如何切换 API 提供方（比如从 SiliconFlow 换到 OpenAI）？
 
-系统通过 `Config` 的 `api_base_url` 和 `api_key` 与上游通讯，你可以：
+系统内置了多 LLM 提供商支持，可以在设置界面直接切换：
 
-1. 在设置界面修改 API 地址与密钥；或
-2. 通过环境变量 `RAGPROJECT_API_BASE_URL` / `RAGPROJECT_API_KEY` 覆盖
+1. 打开管理后台 → 设置
+2. 在「服务商」下拉框中选择目标提供商
+3. 填写对应的 API 密钥
+4. 可选：自定义 API 地址和模型名称
+5. 点击「测试连接」验证配置
+6. 保存设置
 
-同时需要根据不同厂商的 API 格式，在 `core/embedding.py` 中做适配调整。
+目前支持的 LLM 提供商：
+
+| 提供商 | 默认 API 地址 | 默认模型 |
+|--------|---------------|----------|
+| OpenAI | https://api.openai.com/v1 | gpt-3.5-turbo |
+| 硅基流动 | https://api.siliconflow.cn/v1 | Qwen/Qwen3-8B |
+| 通义千问 | https://dashscope.aliyuncs.com/compatible-mode/v1 | qwen-turbo |
+| 智谱AI | https://open.bigmodel.cn/api/paas/v4 | glm-4-flash |
+| DeepSeek | https://api.deepseek.com/v1 | deepseek-chat |
+
+你也可以通过环境变量覆盖配置：
+- `RAGPROJECT_API_KEY` / `SILICONFLOW_API_KEY` / `OPENAI_API_KEY`
+- `RAGPROJECT_API_BASE_URL` / `SILICONFLOW_API_BASE_URL` / `OPENAI_BASE_URL`
 
 ---
 

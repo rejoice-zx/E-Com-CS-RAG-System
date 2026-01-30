@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-API客户端模块 - 支持硅基流动(SiliconFlow) API
+API客户端模块 - 支持多LLM提供商
 
-优化内容 (v2.2.0):
+优化内容 (v3.0.0):
+- 抽象API层，支持多个LLM提供商
+- 支持OpenAI、硅基流动、通义千问、智谱AI、DeepSeek等
 - 细化异常处理（区分网络错误、超时、API错误等）
 - 添加指数退避重试机制
 - 集成API限流保护
@@ -11,24 +13,24 @@ API客户端模块 - 支持硅基流动(SiliconFlow) API
 import json
 import random
 import time
-import requests
 import logging
-from typing import Optional, Callable, Tuple
-from requests.exceptions import RequestException, Timeout, ConnectionError, HTTPError
+from typing import Optional, Callable, List, Dict, Any
 from core.config import Config
 from core.rate_limiter import RateLimiter
 from core.performance import PerformanceMonitor
+from core.llm_providers import (
+    BaseLLMProvider, LLMProviderError, LLMResponse,
+    get_provider, get_all_providers, PROVIDER_REGISTRY
+)
 
 
 logger = logging.getLogger(__name__)
 
 
-class APIError(Exception):
-    """API调用错误"""
-    def __init__(self, message: str, status_code: int = None, retryable: bool = False):
-        super().__init__(message)
-        self.status_code = status_code
-        self.retryable = retryable
+# 兼容旧代码
+class APIError(LLMProviderError):
+    """API调用错误（兼容旧代码）"""
+    pass
 
 
 def exponential_backoff(attempt: int, base_delay: float = 1.0, max_delay: float = 30.0) -> float:
@@ -49,7 +51,7 @@ def exponential_backoff(attempt: int, base_delay: float = 1.0, max_delay: float 
 
 
 class APIClient:
-    """API客户端类 - 支持硅基流动API"""
+    """API客户端类 - 支持多LLM提供商"""
     
     _instance = None
     
@@ -65,19 +67,103 @@ class APIClient:
         self._callback: Optional[Callable] = None
         self._rate_limiter = RateLimiter()
         self._perf_monitor = PerformanceMonitor()
-        
-        # 硅基流动API默认配置
-        self._default_api_url = "https://api.siliconflow.cn/v1"
-        self._default_model = "Qwen/Qwen3-8B"
+        self._provider: Optional[BaseLLMProvider] = None
         
         # 重试配置
         self._max_retries = 3
         self._base_delay = 1.0
+        
+        # 初始化提供商
+        self._init_provider()
+    
+    def _init_provider(self):
+        """初始化LLM提供商"""
+        provider_name = self.config.get("llm_provider", "siliconflow")
+        api_key = self.config.get("api_key", "")
+        api_url = self.config.get("api_base_url", "")
+        model = self.config.get("model_name", "")
+        
+        if api_key:
+            try:
+                provider_class = get_provider(provider_name)
+                self._provider = provider_class(
+                    api_key=api_key,
+                    api_url=api_url if api_url else None,
+                    model=model if model else None,
+                    timeout=self.config.get("api_timeout", 30)
+                )
+                logger.info(f"已初始化LLM提供商: {provider_class.display_name}")
+            except ValueError as e:
+                logger.warning(f"初始化提供商失败: {e}，将使用默认提供商")
+                self._provider = None
+        else:
+            self._provider = None
+    
+    def switch_provider(self, provider_name: str, api_key: str = None, 
+                       api_url: str = None, model: str = None) -> bool:
+        """切换LLM提供商
+        
+        Args:
+            provider_name: 提供商名称
+            api_key: API密钥（可选，不提供则使用配置中的）
+            api_url: API地址（可选）
+            model: 模型名称（可选）
+        
+        Returns:
+            是否切换成功
+        """
+        try:
+            provider_class = get_provider(provider_name)
+            key = api_key or self.config.get("api_key", "")
+            
+            if not key:
+                logger.error("切换提供商失败：未提供API密钥")
+                return False
+            
+            self._provider = provider_class(
+                api_key=key,
+                api_url=api_url,
+                model=model,
+                timeout=self.config.get("api_timeout", 30)
+            )
+            
+            # 保存配置
+            self.config.set("llm_provider", provider_name)
+            if api_key:
+                self.config.set("api_key", api_key)
+            if api_url:
+                self.config.set("api_base_url", api_url)
+            if model:
+                self.config.set("model_name", model)
+            
+            logger.info(f"已切换到LLM提供商: {provider_class.display_name}")
+            return True
+            
+        except ValueError as e:
+            logger.error(f"切换提供商失败: {e}")
+            return False
+    
+    def get_current_provider(self) -> Optional[Dict[str, Any]]:
+        """获取当前提供商信息"""
+        if not self._provider:
+            return None
+        return {
+            "name": self._provider.name,
+            "display_name": self._provider.display_name,
+            "api_url": self._provider.api_url,
+            "model": self._provider.model,
+            "supported_models": self._provider.supported_models,
+        }
+    
+    @staticmethod
+    def get_available_providers() -> List[Dict[str, Any]]:
+        """获取所有可用的提供商列表"""
+        return get_all_providers()
 
     def is_configured(self) -> bool:
         """检查API是否已配置"""
         api_key = self.config.get("api_key", "")
-        return bool(api_key)
+        return bool(api_key) and self._provider is not None
     
     def set_response_callback(self, callback: Callable[[str], None]) -> None:
         """设置响应回调函数"""
@@ -144,7 +230,7 @@ class APIClient:
                 
                 return self._do_api_call(messages, history_len, context_len)
                 
-            except APIError as e:
+            except LLMProviderError as e:
                 last_error = e
                 if not e.retryable or attempt >= self._max_retries - 1:
                     break
@@ -169,80 +255,41 @@ class APIClient:
         start_time = time_module.perf_counter()
         success = False
         
-        api_url = self.config.get("api_base_url", "") or self._default_api_url
-        api_key = self.config.get("api_key", "")
-        model = self.config.get("model_name", "") or self._default_model
+        if not self._provider:
+            self._init_provider()
+            if not self._provider:
+                raise LLMProviderError("未配置LLM提供商", retryable=False)
+        
+        model = self._provider.model
         max_tokens = self.config.get("max_tokens", 2048)
         temperature = self.config.get("temperature", 0.7)
-        
-        url = f"{api_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": model,
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "stream": False
-        }
 
         logger.info(
             "调用API: %s, 模型: %s, history_len=%s, context_len=%s",
-            url,
+            self._provider.display_name,
             model,
             history_len,
             context_len,
         )
         
         try:
-            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            response = self._provider.chat(
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature
+            )
             
-            # 根据状态码处理不同错误
-            if response.status_code == 200:
-                result = response.json()
-                content = result["choices"][0]["message"]["content"]
-                logger.info("API回复成功，长度: %s", len(content))
-                success = True
-                return content
+            content = response.content
+            logger.info("API回复成功，长度: %s", len(content))
+            success = True
+            return content
             
-            elif response.status_code == 401:
-                raise APIError("API密钥无效或已过期", response.status_code, retryable=False)
-            
-            elif response.status_code == 403:
-                raise APIError("API访问被拒绝，请检查权限", response.status_code, retryable=False)
-            
-            elif response.status_code == 429:
-                raise APIError("API请求过于频繁，已触发限流", response.status_code, retryable=True)
-            
-            elif response.status_code >= 500:
-                raise APIError(f"服务器错误 ({response.status_code})", response.status_code, retryable=True)
-            
-            else:
-                # 尝试解析错误信息
-                try:
-                    error_data = response.json()
-                    error_msg = error_data.get("error", {}).get("message", response.text)
-                except:
-                    error_msg = response.text
-                raise APIError(f"API错误 ({response.status_code}): {error_msg}", response.status_code, retryable=False)
-                
-        except Timeout:
-            raise APIError("请求超时，请稍后重试", retryable=True)
-        
-        except ConnectionError:
-            raise APIError("网络连接失败，请检查网络", retryable=True)
-        
-        except json.JSONDecodeError:
-            raise APIError("API返回数据格式错误", retryable=False)
-        
         finally:
             # 记录性能指标
             duration = time_module.perf_counter() - start_time
             self._perf_monitor.record("chat_api", duration, success, {
-                "model": model,
+                "provider": self._provider.name if self._provider else "unknown",
+                "model": model if self._provider else "unknown",
                 "history_len": history_len,
                 "context_len": context_len
             })
@@ -290,10 +337,11 @@ class APIClient:
         if not self.is_configured():
             return False, "未配置API密钥"
         
-        try:
-            response = self._call_api("你好")
-            if "抱歉" in response or "错误" in response:
-                return False, response
-            return True, "连接成功！"
-        except Exception as e:
-            return False, str(e)
+        if not self._provider:
+            return False, "未初始化LLM提供商"
+        
+        return self._provider.test_connection()
+    
+    def reload_provider(self) -> None:
+        """重新加载提供商（配置变更后调用）"""
+        self._init_provider()
