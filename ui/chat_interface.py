@@ -3,12 +3,13 @@
 客户问答界面 - 集成知识库和会话同步
 """
 
+import re
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame,
     QScrollArea, QLabel, QStackedWidget, QSizePolicy, QApplication
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QThread, QObject, QSize
-from PySide6.QtGui import QFontMetrics
+from PySide6.QtGui import QFontMetrics, QDesktopServices
 
 from qfluentwidgets import (
     PushButton, PrimaryPushButton, TextEdit, LineEdit,
@@ -21,6 +22,70 @@ from core.conversation import ConversationManager, Conversation
 from core.api_client import APIClient
 from core.shared_data import KnowledgeStore
 from core.statistics import StatisticsManager
+
+
+class MarkdownRenderer:
+    """简易 Markdown 渲染器，将 Markdown 转换为 HTML"""
+    
+    @staticmethod
+    def render(text: str) -> str:
+        """将 Markdown 文本转换为 HTML"""
+        if not text:
+            return ""
+        
+        # 转义 HTML 特殊字符（但保留我们要处理的 Markdown 语法）
+        text = text.replace("&", "&amp;")
+        text = text.replace("<", "&lt;")
+        text = text.replace(">", "&gt;")
+        
+        # 处理代码块 ```code```
+        def replace_code_block(match):
+            lang = match.group(1) or ""
+            code = match.group(2).strip()
+            return f'<pre style="background-color: #f5f5f5; padding: 10px; border-radius: 6px; font-family: Consolas, Monaco, monospace; font-size: 13px; margin: 6px 0; white-space: pre-wrap; word-wrap: break-word;"><code>{code}</code></pre>'
+        
+        text = re.sub(r'```(\w*)\n(.*?)```', replace_code_block, text, flags=re.DOTALL)
+        
+        # 处理行内代码 `code`
+        text = re.sub(
+            r'`([^`]+)`',
+            r'<code style="background-color: #f0f0f0; padding: 1px 4px; border-radius: 3px; font-family: Consolas, Monaco, monospace; font-size: 13px;">\1</code>',
+            text
+        )
+        
+        # 处理粗体 **text** 或 __text__
+        text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+        text = re.sub(r'__(.+?)__', r'<b>\1</b>', text)
+        
+        # 处理斜体 *text* 或 _text_（注意不要和粗体冲突）
+        text = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'<i>\1</i>', text)
+        text = re.sub(r'(?<!_)_(?!_)(.+?)(?<!_)_(?!_)', r'<i>\1</i>', text)
+        
+        # 处理标题
+        text = re.sub(r'^### (.+)$', r'<div style="font-weight: bold; font-size: 14px; margin: 6px 0;">\1</div>', text, flags=re.MULTILINE)
+        text = re.sub(r'^## (.+)$', r'<div style="font-weight: bold; font-size: 15px; margin: 6px 0;">\1</div>', text, flags=re.MULTILINE)
+        text = re.sub(r'^# (.+)$', r'<div style="font-weight: bold; font-size: 16px; margin: 6px 0;">\1</div>', text, flags=re.MULTILINE)
+        
+        # 处理无序列表
+        text = re.sub(r'^[\-\*] (.+)$', r'• \1<br>', text, flags=re.MULTILINE)
+        
+        # 处理有序列表
+        text = re.sub(r'^(\d+)\. (.+)$', r'\1. \2<br>', text, flags=re.MULTILINE)
+        
+        # 处理链接 [text](url)
+        text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2" style="color: #1976d2;">\1</a>', text)
+        
+        # 处理分隔线
+        text = re.sub(r'^---+$', r'<hr style="border: none; border-top: 1px solid #e0e0e0; margin: 8px 0;">', text, flags=re.MULTILINE)
+        
+        # 处理换行
+        text = text.replace('\n\n', '<br><br>')
+        text = text.replace('\n', '<br>')
+        
+        # 清理多余的换行
+        text = re.sub(r'(<br>){3,}', '<br><br>', text)
+        
+        return text
 
 
 class ChatWorker(QObject):
@@ -156,7 +221,6 @@ class ConversationListItem(CardWidget):
                 background-color: rgba(255, 77, 79, 0.1);
             }
         """)
-        self.delete_btn.setToolTip("删除对话")
         self.delete_btn.setVisible(False)
         self.delete_btn.mousePressEvent = lambda e: self.delete_clicked.emit(self.conv_id)
         self._layout.addWidget(self.delete_btn)
@@ -342,17 +406,22 @@ class Sidebar(QFrame):
 
 
 class MessageBubble(QFrame):
-    """消息气泡"""
+    """消息气泡 - 支持 Markdown 渲染，宽度自适应"""
     
     def __init__(self, role: str, content: str, parent=None):
         super().__init__(parent)
         self.role = role
+        self.content = content
+        
+        # 设置大小策略为根据内容调整
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Minimum)
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(6)
         
         if role == "user":
-            # 用户消息 - 浅蓝色气泡
+            # 用户消息 - 浅蓝色气泡，纯文本
             self.setStyleSheet("""
                 QFrame {
                     background-color: #bbdefb;
@@ -367,8 +436,9 @@ class MessageBubble(QFrame):
             label = BodyLabel(content)
             label.setWordWrap(True)
             label.setStyleSheet("color: #000000; font-size: 14px; border: none; background: transparent;")
+            layout.addWidget(label)
         else:
-            # AI/人工客服消息 - 白色气泡带浅灰边框
+            # AI/人工客服消息 - 白色气泡，支持 Markdown
             self.setStyleSheet("""
                 QFrame {
                     background-color: #ffffff;
@@ -380,6 +450,7 @@ class MessageBubble(QFrame):
                     background: transparent;
                 }
             """)
+            
             # 根据消息内容判断是人工客服还是AI
             if "[人工客服]" in content:
                 ai_label = BodyLabel("👨‍💼 人工客服")
@@ -389,11 +460,26 @@ class MessageBubble(QFrame):
                 ai_label.setStyleSheet("color: #1976d2; font-weight: bold; font-size: 13px; border: none; background: transparent;")
             layout.addWidget(ai_label)
             
-            label = BodyLabel(content)
-            label.setWordWrap(True)
-            label.setStyleSheet("color: #424242; font-size: 14px; border: none; background: transparent;")
-        
-        layout.addWidget(label)
+            # 使用 QLabel 显示 Markdown 渲染后的 HTML
+            content_label = QLabel()
+            content_label.setWordWrap(True)
+            content_label.setTextFormat(Qt.RichText)
+            content_label.setOpenExternalLinks(True)
+            content_label.setStyleSheet("""
+                QLabel {
+                    border: none;
+                    background: transparent;
+                    color: #424242;
+                    font-size: 14px;
+                    line-height: 1.5;
+                }
+            """)
+            
+            # 渲染 Markdown
+            html_content = MarkdownRenderer.render(content)
+            content_label.setText(html_content)
+            
+            layout.addWidget(content_label)
 
 
 class WelcomeWidget(QWidget):
@@ -541,7 +627,9 @@ class ChatArea(QWidget):
         row.setSpacing(0)
         
         bubble = MessageBubble(role, content)
-        bubble.setMaximumWidth(600)
+        # 设置最大宽度为聊天区域的70%，最小100px
+        max_width = max(100, int(self.scroll.viewport().width() * 0.7))
+        bubble.setMaximumWidth(max_width)
         
         if role == "user":
             row.addStretch()

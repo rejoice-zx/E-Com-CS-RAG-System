@@ -6,7 +6,7 @@
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame,
-    QGridLayout, QFileDialog, QHeaderView
+    QGridLayout, QFileDialog, QHeaderView, QApplication
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
@@ -70,6 +70,17 @@ class PerformanceInterface(QWidget):
         self._init_ui()
         self._refresh_data()
     
+    def _ensure_valid_font_point_size(self, widget: QWidget) -> None:
+        font = widget.font()
+        if font.pointSize() > 0:
+            return
+        base = QApplication.font()
+        point_size = base.pointSize()
+        if point_size <= 0:
+            point_size = 10
+        font.setPointSize(point_size)
+        widget.setFont(font)
+    
     def _init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
@@ -84,6 +95,7 @@ class PerformanceInterface(QWidget):
         # 自动刷新
         header.addWidget(BodyLabel("自动刷新:"))
         self.auto_refresh_switch = SwitchButton()
+        self._ensure_valid_font_point_size(self.auto_refresh_switch)
         self.auto_refresh_switch.checkedChanged.connect(self._toggle_auto_refresh)
         header.addWidget(self.auto_refresh_switch)
         

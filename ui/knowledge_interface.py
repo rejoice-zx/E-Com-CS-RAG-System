@@ -15,7 +15,7 @@ from PySide6.QtCore import Qt, Signal, QThread, QObject
 
 from qfluentwidgets import (
     CardWidget, BodyLabel, TitleLabel, SubtitleLabel,
-    PushButton, PrimaryPushButton, TransparentPushButton,
+    PushButton, PrimaryPushButton,
     ComboBox, TableWidget, SearchLineEdit, SpinBox, 
     LineEdit, TextEdit, FluentIcon, ListWidget,
     MessageBox, InfoBar, InfoBarPosition
@@ -370,7 +370,7 @@ class DocumentListPanel(QFrame):
         self._refresh_table()
     
     def load_by_category(self, category: str):
-        self.title.setText(f"📋 知识列表 - {category}")
+        # 不修改标题，避免UI重叠
         if category == "全部":
             self.current_items = self.knowledge_store.get_all_items()
         else:

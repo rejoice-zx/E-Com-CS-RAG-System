@@ -77,7 +77,7 @@ QToolTip {
     border: none;
     border-radius: 4px;
     padding: 6px 10px;
-    font-size: 12px;
+    font-size: 12pt;
 }
 
 /* ===== 菜单样式 ===== */

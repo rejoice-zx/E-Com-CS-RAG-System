@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 # 尝试导入Qt组件
 try:
-    from PySide6.QtCore import QTimer, QObject, Signal
+    from PySide6.QtCore import QTimer, QObject, Signal, QEvent
     QT_AVAILABLE = True
 except ImportError:
     QT_AVAILABLE = False
@@ -207,6 +207,46 @@ if QT_AVAILABLE:
                     self._update_func()
                 except Exception as e:
                     logger.exception(f"延迟更新执行失败: {e}")
+
+
+if QT_AVAILABLE:
+    class FontPointSizeNormalizer(QObject):
+        def eventFilter(self, obj, event):
+            from PySide6.QtWidgets import QWidget, QApplication
+
+            if isinstance(obj, QWidget):
+                et = event.type()
+                if et in (QEvent.Polish, QEvent.Show, QEvent.Enter, QEvent.ToolTip, QEvent.ToolTipChange):
+                    font = obj.font()
+                    if font.pointSize() <= 0:
+                        pixel = font.pixelSize()
+                        if pixel > 0:
+                            dpi = obj.logicalDpiY()
+                            if dpi <= 0:
+                                screen = QApplication.primaryScreen()
+                                dpi = screen.logicalDotsPerInchY() if screen else 96.0
+                            point = int(round(pixel * 72.0 / float(dpi)))
+                            if point <= 0:
+                                point = QApplication.font().pointSize()
+                                if point <= 0:
+                                    point = 10
+                        else:
+                            point = QApplication.font().pointSize()
+                            if point <= 0:
+                                point = 10
+
+                        font.setPointSize(point)
+                        obj.setFont(font)
+
+            return False
+
+
+def install_font_point_size_normalizer(app):
+    if not QT_AVAILABLE or not app:
+        return None
+    normalizer = FontPointSizeNormalizer(app)
+    app.installEventFilter(normalizer)
+    return normalizer
 
 
 def throttle(min_interval: float = 0.1):

@@ -6,7 +6,7 @@
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame,
-    QSplitter, QFileDialog
+    QSplitter, QFileDialog, QApplication
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont, QTextCharFormat, QColor, QTextCursor
@@ -35,6 +35,17 @@ class LogViewerPanel(QFrame):
         
         self._init_ui()
         self._load_log_files()
+    
+    def _ensure_valid_font_point_size(self, widget: QWidget) -> None:
+        font = widget.font()
+        if font.pointSize() > 0:
+            return
+        base = QApplication.font()
+        point_size = base.pointSize()
+        if point_size <= 0:
+            point_size = 10
+        font.setPointSize(point_size)
+        widget.setFont(font)
     
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -71,6 +82,7 @@ class LogViewerPanel(QFrame):
         # 自动刷新
         toolbar.addWidget(BodyLabel("自动刷新:"))
         self.auto_refresh_switch = SwitchButton()
+        self._ensure_valid_font_point_size(self.auto_refresh_switch)
         self.auto_refresh_switch.checkedChanged.connect(self._toggle_auto_refresh)
         toolbar.addWidget(self.auto_refresh_switch)
         

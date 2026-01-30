@@ -10,7 +10,6 @@ Embedding模块 - 调用硅基流动API进行文本向量化
 """
 
 import time
-import random
 import requests
 import logging
 from typing import List, Optional, Tuple
@@ -18,16 +17,10 @@ from requests.exceptions import RequestException, Timeout, ConnectionError
 from core.config import Config
 from core.rate_limiter import RateLimiter
 from core.performance import PerformanceMonitor
+from core.api_client import exponential_backoff  # 复用api_client中的函数
 
 
 logger = logging.getLogger(__name__)
-
-
-def exponential_backoff(attempt: int, base_delay: float = 1.0, max_delay: float = 30.0) -> float:
-    """计算指数退避延迟时间"""
-    delay = min(base_delay * (2 ** attempt), max_delay)
-    jitter = delay * 0.25 * (random.random() * 2 - 1)
-    return max(0.1, delay + jitter)
 
 
 class EmbeddingClient:

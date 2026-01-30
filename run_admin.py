@@ -29,6 +29,13 @@ def main():
     
     app = QApplication(sys.argv)
     app.setApplicationName("智能电商客服 - 管理后台")
+    font = app.font()
+    if font.pointSize() <= 0:
+        font.setPointSize(10)
+        app.setFont(font)
+
+    from core.ui_utils import install_font_point_size_normalizer
+    install_font_point_size_normalizer(app)
     
     config = Config()
     

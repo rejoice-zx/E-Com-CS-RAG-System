@@ -33,7 +33,7 @@ class LLMProviderError(Exception):
 
 
 class BaseLLMProvider(ABC):
-    """LLM提供商基类"""
+    """LLM提供商基类 - 通用聊天实现"""
     
     # 子类需要定义这些属性
     name: str = "base"
@@ -49,10 +49,52 @@ class BaseLLMProvider(ABC):
         self.timeout = kwargs.get("timeout", 30)
         self.extra_config = kwargs
     
-    @abstractmethod
+    def _get_chat_endpoint(self) -> str:
+        """获取聊天API端点，子类可覆盖"""
+        return f"{self.api_url}/chat/completions"
+    
+    def _get_headers(self) -> Dict[str, str]:
+        """获取请求头，子类可覆盖"""
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+    
+    def _build_payload(self, messages: List[Dict], **kwargs) -> Dict:
+        """构建请求体，子类可覆盖"""
+        return {
+            "model": kwargs.get("model", self.model),
+            "messages": messages,
+            "max_tokens": kwargs.get("max_tokens", 2048),
+            "temperature": kwargs.get("temperature", 0.7),
+            "stream": False
+        }
+    
     def chat(self, messages: List[Dict], **kwargs) -> LLMResponse:
-        """发送聊天请求"""
-        pass
+        """发送聊天请求 - 通用实现"""
+        url = self._get_chat_endpoint()
+        headers = self._get_headers()
+        payload = self._build_payload(messages, **kwargs)
+        
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
+            
+            if response.status_code != 200:
+                self._handle_response_error(response)
+            
+            result = response.json()
+            return LLMResponse(
+                content=result["choices"][0]["message"]["content"],
+                model=result.get("model", self.model),
+                usage=result.get("usage"),
+                raw_response=result
+            )
+        except Timeout:
+            raise LLMProviderError("请求超时", retryable=True)
+        except ConnectionError:
+            raise LLMProviderError("网络连接失败", retryable=True)
+        except json.JSONDecodeError:
+            raise LLMProviderError("响应数据格式错误", retryable=False)
     
     def _handle_response_error(self, response: requests.Response) -> None:
         """处理HTTP响应错误"""
@@ -94,41 +136,6 @@ class OpenAIProvider(BaseLLMProvider):
         "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4",
         "gpt-3.5-turbo", "gpt-3.5-turbo-16k"
     ]
-    
-    def chat(self, messages: List[Dict], **kwargs) -> LLMResponse:
-        url = f"{self.api_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": kwargs.get("model", self.model),
-            "messages": messages,
-            "max_tokens": kwargs.get("max_tokens", 2048),
-            "temperature": kwargs.get("temperature", 0.7),
-            "stream": False
-        }
-        
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
-            
-            if response.status_code != 200:
-                self._handle_response_error(response)
-            
-            result = response.json()
-            return LLMResponse(
-                content=result["choices"][0]["message"]["content"],
-                model=result.get("model", self.model),
-                usage=result.get("usage"),
-                raw_response=result
-            )
-        except Timeout:
-            raise LLMProviderError("请求超时", retryable=True)
-        except ConnectionError:
-            raise LLMProviderError("网络连接失败", retryable=True)
-        except json.JSONDecodeError:
-            raise LLMProviderError("响应数据格式错误", retryable=False)
 
 
 class SiliconFlowProvider(BaseLLMProvider):
@@ -144,41 +151,6 @@ class SiliconFlowProvider(BaseLLMProvider):
         "deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-R1",
         "THUDM/glm-4-9b-chat", "01-ai/Yi-1.5-9B-Chat"
     ]
-    
-    def chat(self, messages: List[Dict], **kwargs) -> LLMResponse:
-        url = f"{self.api_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": kwargs.get("model", self.model),
-            "messages": messages,
-            "max_tokens": kwargs.get("max_tokens", 2048),
-            "temperature": kwargs.get("temperature", 0.7),
-            "stream": False
-        }
-        
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
-            
-            if response.status_code != 200:
-                self._handle_response_error(response)
-            
-            result = response.json()
-            return LLMResponse(
-                content=result["choices"][0]["message"]["content"],
-                model=result.get("model", self.model),
-                usage=result.get("usage"),
-                raw_response=result
-            )
-        except Timeout:
-            raise LLMProviderError("请求超时", retryable=True)
-        except ConnectionError:
-            raise LLMProviderError("网络连接失败", retryable=True)
-        except json.JSONDecodeError:
-            raise LLMProviderError("响应数据格式错误", retryable=False)
 
 
 class QwenProvider(BaseLLMProvider):
@@ -192,41 +164,6 @@ class QwenProvider(BaseLLMProvider):
         "qwen-turbo", "qwen-plus", "qwen-max", "qwen-max-longcontext",
         "qwen-long", "qwen2.5-72b-instruct", "qwen2.5-32b-instruct"
     ]
-    
-    def chat(self, messages: List[Dict], **kwargs) -> LLMResponse:
-        url = f"{self.api_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": kwargs.get("model", self.model),
-            "messages": messages,
-            "max_tokens": kwargs.get("max_tokens", 2048),
-            "temperature": kwargs.get("temperature", 0.7),
-            "stream": False
-        }
-        
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
-            
-            if response.status_code != 200:
-                self._handle_response_error(response)
-            
-            result = response.json()
-            return LLMResponse(
-                content=result["choices"][0]["message"]["content"],
-                model=result.get("model", self.model),
-                usage=result.get("usage"),
-                raw_response=result
-            )
-        except Timeout:
-            raise LLMProviderError("请求超时", retryable=True)
-        except ConnectionError:
-            raise LLMProviderError("网络连接失败", retryable=True)
-        except json.JSONDecodeError:
-            raise LLMProviderError("响应数据格式错误", retryable=False)
 
 
 class ZhipuProvider(BaseLLMProvider):
@@ -240,41 +177,6 @@ class ZhipuProvider(BaseLLMProvider):
         "glm-4-plus", "glm-4-0520", "glm-4", "glm-4-air",
         "glm-4-airx", "glm-4-long", "glm-4-flash"
     ]
-    
-    def chat(self, messages: List[Dict], **kwargs) -> LLMResponse:
-        url = f"{self.api_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": kwargs.get("model", self.model),
-            "messages": messages,
-            "max_tokens": kwargs.get("max_tokens", 2048),
-            "temperature": kwargs.get("temperature", 0.7),
-            "stream": False
-        }
-        
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
-            
-            if response.status_code != 200:
-                self._handle_response_error(response)
-            
-            result = response.json()
-            return LLMResponse(
-                content=result["choices"][0]["message"]["content"],
-                model=result.get("model", self.model),
-                usage=result.get("usage"),
-                raw_response=result
-            )
-        except Timeout:
-            raise LLMProviderError("请求超时", retryable=True)
-        except ConnectionError:
-            raise LLMProviderError("网络连接失败", retryable=True)
-        except json.JSONDecodeError:
-            raise LLMProviderError("响应数据格式错误", retryable=False)
 
 
 class DeepSeekProvider(BaseLLMProvider):
@@ -285,41 +187,6 @@ class DeepSeekProvider(BaseLLMProvider):
     default_api_url = "https://api.deepseek.com/v1"
     default_model = "deepseek-chat"
     supported_models = ["deepseek-chat", "deepseek-reasoner"]
-    
-    def chat(self, messages: List[Dict], **kwargs) -> LLMResponse:
-        url = f"{self.api_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": kwargs.get("model", self.model),
-            "messages": messages,
-            "max_tokens": kwargs.get("max_tokens", 2048),
-            "temperature": kwargs.get("temperature", 0.7),
-            "stream": False
-        }
-        
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
-            
-            if response.status_code != 200:
-                self._handle_response_error(response)
-            
-            result = response.json()
-            return LLMResponse(
-                content=result["choices"][0]["message"]["content"],
-                model=result.get("model", self.model),
-                usage=result.get("usage"),
-                raw_response=result
-            )
-        except Timeout:
-            raise LLMProviderError("请求超时", retryable=True)
-        except ConnectionError:
-            raise LLMProviderError("网络连接失败", retryable=True)
-        except json.JSONDecodeError:
-            raise LLMProviderError("响应数据格式错误", retryable=False)
 
 
 # 提供商注册表

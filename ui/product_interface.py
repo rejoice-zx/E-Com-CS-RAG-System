@@ -6,7 +6,7 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame,
     QScrollArea, QTableWidgetItem, QHeaderView, 
-    QAbstractItemView, QDialog, QFormLayout, QGridLayout, QApplication
+    QAbstractItemView, QDialog, QFormLayout, QApplication
 )
 from PySide6.QtCore import Qt, Signal, QSize
 
@@ -457,7 +457,7 @@ class ProductListPanel(QFrame):
         self._refresh_table()
     
     def load_by_category(self, category: str):
-        self.title.setText(f"📋 商品列表 - {category}")
+        # 不修改标题，避免UI重叠
         if category == "全部":
             self.current_products = self.product_store.get_all_products()
         else:
