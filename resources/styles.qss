@@ -1,0 +1,108 @@
+/* 
+ * 智能电商客服RAG系统 - 全局样式表
+ * 现代化扁平风格设计
+ */
+
+/* ===== 全局样式 ===== */
+* {
+    font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+}
+
+QMainWindow {
+    background-color: #FFFFFF;
+}
+
+QWidget {
+    color: #333333;
+}
+
+/* ===== 滚动条样式 ===== */
+QScrollBar:vertical {
+    background: #F5F5F5;
+    width: 8px;
+    margin: 0;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:vertical {
+    background: #CCCCCC;
+    border-radius: 4px;
+    min-height: 30px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #AAAAAA;
+}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {
+    height: 0;
+}
+
+QScrollBar::add-page:vertical,
+QScrollBar::sub-page:vertical {
+    background: transparent;
+}
+
+/* ===== 按钮通用样式 ===== */
+QPushButton {
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 14px;
+}
+
+QPushButton:focus {
+    outline: none;
+}
+
+/* ===== 输入框样式 ===== */
+QLineEdit, QTextEdit {
+    border: 1px solid #E5E5E5;
+    border-radius: 8px;
+    padding: 8px 12px;
+    background-color: #FAFAFA;
+    selection-background-color: #4A90D9;
+}
+
+QLineEdit:focus, QTextEdit:focus {
+    border-color: #4A90D9;
+    background-color: #FFFFFF;
+}
+
+/* ===== 工具提示 ===== */
+QToolTip {
+    background-color: #333333;
+    color: #FFFFFF;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 12px;
+}
+
+/* ===== 菜单样式 ===== */
+QMenu {
+    background-color: #FFFFFF;
+    border: 1px solid #E5E5E5;
+    border-radius: 8px;
+    padding: 4px;
+}
+
+QMenu::item {
+    padding: 8px 24px;
+    border-radius: 4px;
+}
+
+QMenu::item:selected {
+    background-color: #F5F5F5;
+}
+
+/* ===== 消息框样式 ===== */
+QMessageBox {
+    background-color: #FFFFFF;
+}
+
+QMessageBox QPushButton {
+    min-width: 80px;
+    min-height: 32px;
+}
